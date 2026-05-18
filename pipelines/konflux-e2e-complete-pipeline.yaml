@@ -1,0 +1,479 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: e2e-openshift-builds
+spec:
+  description: |
+    An integration test which provisions an ephemeral Hypershift cluster and deploys an Operator
+    bundle from a Konflux snapshot. Enhanced with custom rh-operator builds and auto-generated BuildRuns.
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Snapshot of the application
+      default: '{"components": [{"name":"test-app", "containerImage":
+        "quay.io/example/repo:latest"}]}'
+    - name: VERSION
+      type: string
+      description: Builds for OpenShift Version
+      default: ""
+    - name: BUILDS_SAMPLES_REPO
+      type: string
+      description: Builds samples repository URL
+      default: "https://github.com/redhat-openshift-builds/samples.git"
+    - name: BUILDS_SAMPLES_BRANCH
+      type: string
+      description: Builds samples branch
+      default: "main"
+    - name: SHIPWRIGHT_BUILD_REPO
+      type: string
+      description: Shipwright build repository URL
+      default: "https://github.com/shipwright-io/build.git"
+    - name: SHIPWRIGHT_BUILD_BRANCH
+      type: string
+      description: Shipwright build branch
+      default: "main"
+    - name: TASKS_REPO_URL
+      type: string
+      description: Git repository URL containing the e2e task definitions
+      default: "https://github.com/redhat-openshift-builds/test.git"
+    - name: TASKS_REPO_REVISION
+      type: string
+      description: Git revision (branch/tag/commit) for the e2e task definitions
+      default: "main"
+    - name: DEBUG
+      type: string
+      description:
+        Set to "true" to dump cluster credentials and keep the cluster
+        alive for 10 minutes after pipeline completion for investigation
+      default: "false"
+    - name: IMAGE_EXPIRY_HOURS
+      type: string
+      description: Hours until test images in quay.io expire and are auto-deleted
+      default: "1"
+  tasks:
+    - name: provision-eaas-space
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/build-definitions.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: task/eaas-provision-space/0.1/eaas-provision-space.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+    - name: validate-snapshot
+      description: Verify snapshot images exist and bundle relatedImages match
+        (fail-fast before cluster)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-validate-snapshot.yaml
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: provision-cluster
+      runAfter:
+        - provision-eaas-space
+        - validate-snapshot
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-provision-cluster.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: imageContentSources
+          value: |
+            - source: registry.redhat.io/openshift-builds/openshift-builds-rhel9-operator
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-operator-bundle
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator-bundle$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-controller-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-controller$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-image-processing-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-processing$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-image-bundler-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-bundler$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-git-cloner-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-git-cloner$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-waiters-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-waiter$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-webhook-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-webhook$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource$(params.VERSION)
+            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-webhook-rhel9
+              mirrors:
+                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource-webhook$(params.VERSION)
+    - name: verify-fips-enabled-on-nodes
+      description: Verify that FIPS is enabled on cluster nodes
+      runAfter:
+        - provision-cluster
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-verify-fips.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+    - name: install-openshift-pipelines
+      runAfter:
+        - provision-cluster
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-install-openshift-pipelines.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+    - name: deploy-and-verify-operator
+      description: Deploy operator and verify operands and CR status
+      runAfter:
+        - verify-fips-enabled-on-nodes
+        - install-openshift-pipelines
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-deploy-operator.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: verify-images
+      description: Verify snapshot images, bundle relatedImages, and running operands
+      runAfter:
+        - deploy-and-verify-operator
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-verify-images.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: run-e2e-tests
+      description: Clone Shipwright repo and run e2e tests against deployed operator
+      runAfter:
+        - verify-images
+      timeout: "3h"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-run-tests.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: BUILDS_SAMPLES_REPO
+          value: $(params.BUILDS_SAMPLES_REPO)
+        - name: BUILDS_SAMPLES_BRANCH
+          value: $(params.BUILDS_SAMPLES_BRANCH)
+        - name: SHIPWRIGHT_BUILD_REPO
+          value: $(params.SHIPWRIGHT_BUILD_REPO)
+        - name: SHIPWRIGHT_BUILD_BRANCH
+          value: $(params.SHIPWRIGHT_BUILD_BRANCH)
+  finally:
+    - name: report-status
+      taskSpec:
+        params:
+          - name: validate-snapshot
+            type: string
+          - name: provision-cluster
+            type: string
+          - name: verify-fips
+            type: string
+          - name: install-pipelines
+            type: string
+          - name: deploy-operator
+            type: string
+          - name: verify-images
+            type: string
+          - name: run-e2e-tests
+            type: string
+          - name: SNAPSHOT
+            type: string
+        steps:
+          - name: report
+            image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+            env:
+              - name: VALIDATE_SNAPSHOT
+                value: $(params.validate-snapshot)
+              - name: PROVISION_CLUSTER
+                value: $(params.provision-cluster)
+              - name: VERIFY_FIPS
+                value: $(params.verify-fips)
+              - name: INSTALL_PIPELINES
+                value: $(params.install-pipelines)
+              - name: DEPLOY_OPERATOR
+                value: $(params.deploy-operator)
+              - name: VERIFY_IMAGES
+                value: $(params.verify-images)
+              - name: RUN_E2E_TESTS
+                value: $(params.run-e2e-tests)
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+            script: |
+              #!/usr/bin/env bash
+              echo "============================================"
+              echo "  PIPELINE STATUS SUMMARY"
+              echo "============================================"
+              FAILED=0
+              for TASK in \
+                "validate-snapshot:$VALIDATE_SNAPSHOT" \
+                "provision-cluster:$PROVISION_CLUSTER" \
+                "verify-fips:$VERIFY_FIPS" \
+                "install-openshift-pipelines:$INSTALL_PIPELINES" \
+                "deploy-and-verify-operator:$DEPLOY_OPERATOR" \
+                "verify-images:$VERIFY_IMAGES" \
+                "run-e2e-tests:$RUN_E2E_TESTS"; do
+                NAME="${TASK%%:*}"
+                STATUS="${TASK##*:}"
+                if [ "$STATUS" = "Succeeded" ]; then
+                  echo "  PASS: $NAME"
+                elif [ "$STATUS" = "Failed" ]; then
+                  echo "  FAIL: $NAME"
+                  FAILED=$((FAILED + 1))
+                else
+                  echo "  SKIP: $NAME ($STATUS)"
+                fi
+              done
+              echo "============================================"
+              if [ "$FAILED" -gt 0 ]; then
+                echo "  $FAILED task(s) failed"
+              else
+                echo "  All tasks passed"
+              fi
+              echo "============================================"
+
+              if [ "$VALIDATE_SNAPSHOT" = "Failed" ]; then
+                echo ""
+                echo "============================================"
+                echo "  SNAPSHOT VALIDATION FAILURE"
+                echo "============================================"
+                echo ""
+                echo "=== Snapshot Components ==="
+                echo "$SNAPSHOT" | jq -r '.components[] | "\(.name): \(.containerImage)"'
+
+                BUNDLE_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | startswith("openshift-builds-operator-bundle")) | .containerImage' | head -1)
+                if [ -z "$BUNDLE_IMAGE" ]; then
+                    echo ""
+                    echo "ERROR: No bundle image found in snapshot"
+                else
+                    echo ""
+                    echo "=== Checking snapshot images in registry ==="
+                    for IMAGE in $(echo "$SNAPSHOT" | jq -r '.components[].containerImage'); do
+                        COMPONENT=$(echo "$SNAPSHOT" | jq -r --arg img "$IMAGE" '.components[] | select(.containerImage == $img) | .name')
+                        if skopeo inspect --no-tags "docker://${IMAGE}" &>/dev/null; then
+                            SNAPSHOT_DIGEST="${IMAGE##*@}"
+                            REGISTRY_DIGEST=$(skopeo inspect --no-tags "docker://${IMAGE}" | jq -r '.Digest')
+                            if [ "$REGISTRY_DIGEST" = "$SNAPSHOT_DIGEST" ]; then
+                                echo "  OK: ${COMPONENT}"
+                            else
+                                echo "  MISMATCH: ${COMPONENT}"
+                                echo "    snapshot: ${SNAPSHOT_DIGEST}"
+                                echo "    registry: ${REGISTRY_DIGEST}"
+                            fi
+                        else
+                            echo "  MISSING: ${COMPONENT} - ${IMAGE}"
+                        fi
+                    done
+
+                    echo ""
+                    echo "=== Checking bundle relatedImages vs snapshot ==="
+                    BUNDLE_DIR=$(mktemp -d)
+                    if skopeo copy "docker://${BUNDLE_IMAGE}" "oci:${BUNDLE_DIR}:latest" 2>/dev/null; then
+                        MANIFEST_DIGEST=$(jq -r '.manifests[0].digest' "${BUNDLE_DIR}/index.json" | sed 's/sha256://')
+                        LAYERS=$(jq -r '.layers[].digest' "${BUNDLE_DIR}/blobs/sha256/${MANIFEST_DIGEST}" | sed 's/sha256://')
+                        EXTRACT_DIR=$(mktemp -d)
+                        for LAYER in $LAYERS; do
+                            tar -xf "${BUNDLE_DIR}/blobs/sha256/${LAYER}" -C "${EXTRACT_DIR}" 2>/dev/null || true
+                        done
+                        CSV_FILE=$(find "${EXTRACT_DIR}" -path "*/manifests/*clusterserviceversion*" -type f | head -1)
+                        if [ -n "$CSV_FILE" ]; then
+                            RELATED=$(yq -r '.spec.relatedImages[].image' "$CSV_FILE" 2>/dev/null)
+                            for COMPONENT in $(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("bundle|fbc|client") | not) | .name'); do
+                                DIGEST=$(echo "$SNAPSHOT" | jq -r --arg name "$COMPONENT" '.components[] | select(.name == $name) | .containerImage' | sed 's/.*@//')
+                                if echo "$RELATED" | grep -q "$DIGEST"; then
+                                    echo "  OK: ${COMPONENT}"
+                                else
+                                    echo "  MISMATCH: ${COMPONENT} - digest ${DIGEST} not in bundle relatedImages"
+                                fi
+                            done
+                        fi
+                        rm -rf "${EXTRACT_DIR}"
+                    else
+                        echo "  Could not pull bundle image for inspection"
+                    fi
+                    rm -rf "${BUNDLE_DIR}"
+                fi
+                echo "============================================"
+              fi
+      params:
+        - name: validate-snapshot
+          value: $(tasks.validate-snapshot.status)
+        - name: provision-cluster
+          value: $(tasks.provision-cluster.status)
+        - name: verify-fips
+          value: $(tasks.verify-fips-enabled-on-nodes.status)
+        - name: install-pipelines
+          value: $(tasks.install-openshift-pipelines.status)
+        - name: deploy-operator
+          value: $(tasks.deploy-and-verify-operator.status)
+        - name: verify-images
+          value: $(tasks.verify-images.status)
+        - name: run-e2e-tests
+          value: $(tasks.run-e2e-tests.status)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: dump-cluster-state
+      when:
+        - input: $(tasks.provision-cluster.status)
+          operator: in
+          values: ["Succeeded"]
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.TASKS_REPO_URL)
+          - name: revision
+            value: $(params.TASKS_REPO_REVISION)
+          - name: pathInRepo
+            value: tasks/e2e-dump-cluster-state.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(tasks.provision-eaas-space.results.secretRef)
+        - name: clusterName
+          value: $(tasks.provision-cluster.results.clusterName)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: DEBUG
+          value: $(params.DEBUG)
+        - name: deploy-operator-status
+          value: $(tasks.deploy-and-verify-operator.status)
+        - name: verify-images-status
+          value: $(tasks.verify-images.status)
+        - name: run-e2e-tests-status
+          value: $(tasks.run-e2e-tests.status)
+    - name: expire-test-images
+      taskSpec:
+        params:
+          - name: IMAGE_EXPIRY_HOURS
+            type: string
+        volumes:
+          - name: registry-secret
+            secret:
+              secretName: redhat-openshift-builds-testing-pull-secret
+        steps:
+          - name: set-expiration
+            image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+            env:
+              - name: IMAGE_EXPIRY_HOURS
+                value: $(params.IMAGE_EXPIRY_HOURS)
+            volumeMounts:
+              - name: registry-secret
+                mountPath: /registry-secret
+                readOnly: true
+            script: |
+              #!/usr/bin/env bash
+              set -uo pipefail
+
+              QUAY_REPO="redhat-openshift-builds/e2e-test"
+              TOKEN=$(jq -r '.auths["quay.io"].auth' /registry-secret/.dockerconfigjson | base64 -d | cut -d: -f2)
+
+              if [ -z "$TOKEN" ]; then
+                  echo "WARN: Could not extract quay.io token, skipping expiration"
+                  exit 0
+              fi
+
+              EXPIRY=$(date -d "+${IMAGE_EXPIRY_HOURS} hours" +%s)
+              echo "Setting expiration to $(date -d "+${IMAGE_EXPIRY_HOURS} hours" '+%Y-%m-%d %H:%M %Z') on all tags"
+
+              TAGS=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
+                "https://quay.io/api/v1/repository/${QUAY_REPO}/tag/?limit=100&onlyActiveTags=true" | \
+                jq -r '.tags[].name' 2>/dev/null || echo "")
+
+              if [ -z "$TAGS" ]; then
+                  echo "No tags found"
+                  exit 0
+              fi
+
+              UPDATED=0
+              for TAG in $TAGS; do
+                  RESP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+                    -H "Authorization: Bearer ${TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"expiration\": ${EXPIRY}}" \
+                    "https://quay.io/api/v1/repository/${QUAY_REPO}/tag/${TAG}")
+                  if [ "$RESP" = "200" ] || [ "$RESP" = "201" ]; then
+                      UPDATED=$((UPDATED + 1))
+                  else
+                      echo "  Failed to set expiration on ${TAG} (HTTP ${RESP})"
+                  fi
+              done
+
+              echo "Set expiration on ${UPDATED} tag(s)"
+      params:
+        - name: IMAGE_EXPIRY_HOURS
+          value: $(params.IMAGE_EXPIRY_HOURS)
