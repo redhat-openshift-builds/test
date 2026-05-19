@@ -1,0 +1,189 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: e2e-dump-cluster-state
+  annotations:
+    tekton.dev/title: "Dump Cluster State for Investigation"
+spec:
+  description: |
+    Finally task that dumps targeted cluster diagnostics based on which task failed.
+    When DEBUG is enabled, outputs cluster credentials and keeps the cluster alive
+    for 10 minutes for manual investigation.
+  params:
+    - name: eaasSpaceSecretRef
+      type: string
+      description: EaaS space secret reference
+    - name: clusterName
+      type: string
+      description: Name of the provisioned cluster
+    - name: SNAPSHOT
+      type: string
+      description: Konflux snapshot JSON
+    - name: DEBUG
+      type: string
+      default: "false"
+      description: Set to "true" to dump credentials and keep cluster alive
+    - name: deploy-operator-status
+      type: string
+      default: "None"
+    - name: verify-images-status
+      type: string
+      default: "None"
+    - name: run-e2e-tests-status
+      type: string
+      default: "None"
+  volumes:
+    - name: credentials
+      emptyDir: {}
+  steps:
+    - name: get-kubeconfig
+      ref:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/build-definitions.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+      params:
+        - name: eaasSpaceSecretRef
+          value: $(params.eaasSpaceSecretRef)
+        - name: clusterName
+          value: $(params.clusterName)
+        - name: credentials
+          value: credentials
+    - name: dump-state
+      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      env:
+        - name: KUBECONFIG
+          value: "/credentials/$(steps.get-kubeconfig.results.kubeconfig)"
+        - name: DEBUG
+          value: $(params.DEBUG)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: DEPLOY_STATUS
+          value: $(params.deploy-operator-status)
+        - name: VERIFY_IMAGES_STATUS
+          value: $(params.verify-images-status)
+        - name: E2E_STATUS
+          value: $(params.run-e2e-tests-status)
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+      script: |
+        #!/usr/bin/env bash
+        set -uo pipefail
+        _trace=$(mktemp)
+        trap 'rc=$?; [ $rc -ne 0 ] && echo "=== DEBUG TRACE ===" >&2 && cat "$_trace" >&2; rm -f "$_trace"' EXIT
+        exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
+
+        if [ "$DEBUG" = "true" ]; then
+            echo "============================================"
+            echo "  CLUSTER CREDENTIALS"
+            echo "============================================"
+            echo "API Server: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+            echo "Console:    $(oc whoami --show-console 2>/dev/null || echo 'unknown')"
+            echo "Username:   kubeadmin"
+            echo "Password:   $(cat /credentials/cluster-*-password 2>/dev/null || echo '(not found)')"
+            echo ""
+            echo "Login command:"
+            echo "  oc login $(oc whoami --show-server 2>/dev/null) -u kubeadmin -p $(cat /credentials/cluster-*-password 2>/dev/null)"
+            echo "============================================"
+        fi
+
+        if [ "$DEPLOY_STATUS" = "Failed" ]; then
+            echo ""
+            echo "============================================"
+            echo "  OPERATOR DEPLOYMENT FAILURE"
+            echo "============================================"
+            echo ""
+            echo "=== Deployments ==="
+            oc get deployments -n openshift-builds -o wide 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== DaemonSets ==="
+            oc get daemonsets -n openshift-builds -o wide 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== Pods ==="
+            oc get pods -n openshift-builds -o wide 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== Pod Logs ==="
+            for POD in $(oc get pods -n openshift-builds -o name 2>/dev/null); do
+                echo "--- ${POD} ---"
+                oc logs -n openshift-builds "${POD}" --all-containers --tail=50 2>/dev/null || echo "(no logs)"
+            done
+            echo "============================================"
+        fi
+
+        if [ "$VERIFY_IMAGES_STATUS" = "Failed" ]; then
+            echo ""
+            echo "============================================"
+            echo "  IMAGE VERIFICATION FAILURE"
+            echo "============================================"
+            OPERANDS=(
+                "deployment/shipwright-build-controller"
+                "deployment/shipwright-build-webhook"
+                "deployment/shared-resource-csi-driver-webhook"
+            )
+            for OPERAND in "${OPERANDS[@]}"; do
+                OPERAND_IMAGE=$(oc get "$OPERAND" -n openshift-builds -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "not found")
+                RUNNING_DIGEST="${OPERAND_IMAGE##*@}"
+                MATCHED=$(echo "$SNAPSHOT" | jq -r --arg digest "$RUNNING_DIGEST" '.components[] | select(.containerImage | contains($digest)) | .name' 2>/dev/null)
+                if [ -n "$MATCHED" ]; then
+                    echo "  PASS: ${OPERAND} -> matches snapshot component '${MATCHED}'"
+                else
+                    echo "  FAIL: ${OPERAND}"
+                    echo "        Running: ${OPERAND_IMAGE}"
+                    echo "        Digest ${RUNNING_DIGEST} not found in snapshot"
+                    echo "        Snapshot components:"
+                    echo "$SNAPSHOT" | jq -r '.components[] | "          \(.name): \(.containerImage)"' 2>/dev/null
+                fi
+            done
+            echo ""
+            echo "=== Events ==="
+            oc get events -n openshift-builds --sort-by=.lastTimestamp 2>/dev/null | tail -20 || echo "(no events)"
+            echo "============================================"
+        fi
+
+        if [ "$E2E_STATUS" = "Failed" ]; then
+            echo ""
+            echo "============================================"
+            echo "  E2E TEST FAILURE"
+            echo "============================================"
+            echo ""
+            echo "=== BuildRuns ==="
+            oc get buildruns -A 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== Failed BuildRuns ==="
+            FAILED_BRS=$(oc get buildruns -A -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Succeeded" and .status=="False")) | "\(.metadata.namespace)/\(.metadata.name)"' 2>/dev/null)
+            if [ -n "$FAILED_BRS" ]; then
+                for BR in $FAILED_BRS; do
+                    NS="${BR%%/*}"
+                    NAME="${BR##*/}"
+                    echo "--- ${BR} ---"
+                    oc get buildrun "$NAME" -n "$NS" -o jsonpath='  Reason: {.status.conditions[?(@.type=="Succeeded")].reason}{"\n"}  Message: {.status.conditions[?(@.type=="Succeeded")].message}{"\n"}' 2>/dev/null
+                    POD=$(oc get pods -n "$NS" -l "buildrun.shipwright.io/name=$NAME" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                    if [ -n "$POD" ]; then
+                        echo "  Pod logs ($POD):"
+                        oc logs -n "$NS" "$POD" --all-containers --tail=30 2>/dev/null || echo "  (no logs)"
+                    fi
+                done
+            else
+                echo "(no failed BuildRuns)"
+            fi
+            echo ""
+            echo "=== Failed Pods in openshift-builds ==="
+            oc get pods -n openshift-builds --field-selector=status.phase=Failed -o wide 2>/dev/null || echo "(none)"
+            echo ""
+            echo "=== Recent Events ==="
+            oc get events -n openshift-builds --sort-by=.lastTimestamp 2>/dev/null | tail -30 || echo "(no events)"
+            echo "============================================"
+        fi
+
+        if [ "$DEBUG" = "true" ]; then
+            echo ""
+            echo "DEBUG: keeping cluster alive for 10 minutes"
+            echo "Cluster will be released at $(date -d '+10 minutes' '+%H:%M:%S %Z' 2>/dev/null || echo 'now + 10m')"
+            sleep 600
+            echo "Debug window expired, releasing cluster"
+        fi
