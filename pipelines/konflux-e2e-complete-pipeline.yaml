@@ -50,6 +50,10 @@ spec:
       type: string
       description: Hours until test images in quay.io expire and are auto-deleted
       default: "1"
+    - name: RHEL_VERSION
+      type: string
+      description: RHEL version suffix used in registry image names (e.g. rhel9, rhel10)
+      default: "rhel9"
   tasks:
     - name: provision-eaas-space
       taskRef:
@@ -99,34 +103,34 @@ spec:
           value: $(tasks.provision-eaas-space.results.secretRef)
         - name: imageContentSources
           value: |
-            - source: registry.redhat.io/openshift-builds/openshift-builds-rhel9-operator
+            - source: registry.redhat.io/openshift-builds/openshift-builds-$(params.RHEL_VERSION)-operator
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator$(params.VERSION)
             - source: registry.redhat.io/openshift-builds/openshift-builds-operator-bundle
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator-bundle$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-controller-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-controller-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-controller$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-image-processing-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-image-processing-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-processing$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-image-bundler-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-image-bundler-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-bundler$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-git-cloner-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-git-cloner-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-git-cloner$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-waiters-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-waiters-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-waiter$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-webhook-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-webhook-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-webhook$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-webhook-rhel9
+            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-webhook-$(params.RHEL_VERSION)
               mirrors:
                 - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource-webhook$(params.VERSION)
     - name: verify-fips-enabled-on-nodes
