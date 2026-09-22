@@ -131,65 +131,59 @@ spec:
         git clone --branch "$SHIPWRIGHT_BUILD_BRANCH" --single-branch "$SHIPWRIGHT_BUILD_REPO" /workspace/openshift-builds
         oc apply -n "${TEST_NAMESPACE}" -R -f /workspace/openshift-builds/samples/v1beta1/buildstrategy/
 
-        echo "=== Waiting for all BuildRuns to complete ==="
-        timeout 10m bash -c '
-          while true; do
-            PENDING=$(oc get buildruns -n '"$SAMPLE_NS"' -o json | jq "
-              [.items[]
-                | select(
-                    .status.conditions == null
-                    or (.status.conditions[0].status | test(\"True|False\") | not)
-                  )
-              ] | length
-            ")
-            [ "$PENDING" -eq 0 ] && break
-            echo "Still waiting for $PENDING BuildRuns..."
-            sleep 20
-          done
-        '
-
-        echo "=== Checking for failed BuildRuns ==="
-        FAILED_BUILDRUNS=$(oc get buildruns -n "$SAMPLE_NS" -o json | jq -r '
-          .items[]
-          | select(.status.conditions[]? | select(.type=="Succeeded" and .status=="False"))
-          | .metadata.name
-        ')
-
-        if [ -z "$FAILED_BUILDRUNS" ]; then
-          echo "No failed BuildRuns detected"
-        else
-          echo "Failed BuildRuns:"
-          echo "$FAILED_BUILDRUNS"
-
-          echo "=== Failure details ==="
-          for BR in $FAILED_BUILDRUNS; do
-            echo "---- BuildRun: $BR ----"
-            oc get buildrun "$BR" -n "$SAMPLE_NS" -o jsonpath='
-          Reason: {.status.conditions[?(@.type=="Succeeded")].reason}{"\n"}
-          Message: {.status.conditions[?(@.type=="Succeeded")].message}{"\n"}
+        BUILDRUN_RC=$(mktemp)
+        BUILDRUN_REPORT=$(mktemp)
+        (
+          set +e
+          timeout 10m bash -c '
+            while true; do
+              PENDING=$(oc get buildruns -n '"$SAMPLE_NS"' -o json | jq "
+                [.items[]
+                  | select(
+                      .status.conditions == null
+                      or (.status.conditions[0].status | test(\"True|False\") | not)
+                    )
+                ] | length
+              ")
+              [ "$PENDING" -eq 0 ] && break
+              sleep 20
+            done
           '
-          done
 
-          echo "=== Fetching logs for failed BuildRuns ==="
-          for BR in $FAILED_BUILDRUNS; do
-            POD=$(oc get pods -n "$SAMPLE_NS" \
-              -l buildrun.shipwright.io/name="$BR" \
-              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          FAILED_BUILDRUNS=$(oc get buildruns -n "$SAMPLE_NS" -o json | jq -r '
+            .items[]
+            | select(.status.conditions[]? | select(.type=="Succeeded" and .status=="False"))
+            | .metadata.name
+          ')
 
-            if [ -n "$POD" ]; then
-              echo "---- Logs for $BR (pod: $POD) ----"
-              oc logs -n "$SAMPLE_NS" "$POD" --all-containers=true || true
-            else
-              echo "No pod found for BuildRun $BR"
-            fi
-          done
+          if [ -z "$FAILED_BUILDRUNS" ]; then
+            echo 0 > "$BUILDRUN_RC"
+          else
+            echo 1 > "$BUILDRUN_RC"
+            {
+              echo "Failed BuildRuns: $FAILED_BUILDRUNS"
+              for BR in $FAILED_BUILDRUNS; do
+                echo "---- BuildRun: $BR ----"
+                oc get buildrun "$BR" -n '"$SAMPLE_NS"' -o jsonpath='
+              Reason: {.status.conditions[?(@.type=="Succeeded")].reason}{"\n"}
+              Message: {.status.conditions[?(@.type=="Succeeded")].message}{"\n"}
+              '
+                POD=$(oc get pods -n '"$SAMPLE_NS"' \
+                  -l buildrun.shipwright.io/name="$BR" \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$POD" ]; then
+                  oc logs -n '"$SAMPLE_NS"' "$POD" --all-containers=true || true
+                fi
+              done
+            } > "$BUILDRUN_REPORT" 2>&1
+          fi
+          exit 0
+        ) &
+        BUILDRUN_PID=$!
 
-          echo "ERROR: One or more BuildRuns failed"
-          exit 1
-        fi
-
+        echo "=== Running ginkgo e2e tests ==="
         cd /workspace/openshift-builds
-
+        GINKGO_FAILED=0
         ginkgo run -r \
           --compilers=2 \
           --randomize-all \
@@ -197,4 +191,23 @@ spec:
           --succinct \
           --label-filter='!Kaniko && !BuildKit && !VulnerabilityScanning && !PipelineRun' \
           --skip='strategy-managed push' \
-          ./test/e2e/v1beta1
+          ./test/e2e/v1beta1 || GINKGO_FAILED=1
+
+        wait "$BUILDRUN_PID" || true
+        BUILDRUN_FAILED=$(cat "$BUILDRUN_RC" 2>/dev/null || echo 1)
+        rm -f "$BUILDRUN_RC"
+
+        echo "============================================"
+        echo "  FINAL REPORT"
+        echo "============================================"
+        if [ "$BUILDRUN_FAILED" -eq 0 ]; then
+          echo "  PASS: sample BuildRuns"
+        else
+          echo "  FAIL: sample BuildRuns"
+          cat "$BUILDRUN_REPORT"
+        fi
+        [ "$GINKGO_FAILED" -eq 0 ] && echo "  PASS: e2e ginkgo tests" || echo "  FAIL: e2e ginkgo tests"
+        echo "============================================"
+        rm -f "$BUILDRUN_REPORT"
+
+        [ "$BUILDRUN_FAILED" -eq 0 ] && [ "$GINKGO_FAILED" -eq 0 ]
