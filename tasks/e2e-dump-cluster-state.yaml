@@ -10,12 +10,9 @@ spec:
     When DEBUG is enabled, outputs cluster credentials and keeps the cluster alive
     for 10 minutes for manual investigation.
   params:
-    - name: eaasSpaceSecretRef
+    - name: clusterCredentialsSecretRef
       type: string
-      description: EaaS space secret reference
-    - name: clusterName
-      type: string
-      description: Name of the provisioned cluster
+      description: Secret containing the cluster kubeconfig
     - name: SNAPSHOT
       type: string
       description: Konflux snapshot JSON
@@ -34,30 +31,14 @@ spec:
       default: "None"
   volumes:
     - name: credentials
-      emptyDir: {}
+      secret:
+        secretName: $(params.clusterCredentialsSecretRef)
   steps:
-    - name: get-kubeconfig
-      ref:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/konflux-ci/build-definitions.git
-          - name: revision
-            value: main
-          - name: pathInRepo
-            value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-      params:
-        - name: eaasSpaceSecretRef
-          value: $(params.eaasSpaceSecretRef)
-        - name: clusterName
-          value: $(params.clusterName)
-        - name: credentials
-          value: credentials
     - name: dump-state
       image: quay.io/avinkuma/rh-openshift-builds/ci:latest
       env:
         - name: KUBECONFIG
-          value: "/credentials/$(steps.get-kubeconfig.results.kubeconfig)"
+          value: /credentials/kubeconfig
         - name: DEBUG
           value: $(params.DEBUG)
         - name: SNAPSHOT
@@ -71,6 +52,7 @@ spec:
       volumeMounts:
         - name: credentials
           mountPath: /credentials
+          readOnly: true
       script: |
         #!/usr/bin/env bash
         set -uo pipefail
@@ -79,16 +61,18 @@ spec:
         exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
 
         if [ "$DEBUG" = "true" ]; then
+            KUBEADMIN_PASSWORD=$(cat /credentials/kubeAdminPassword)
+
             echo "============================================"
             echo "  CLUSTER CREDENTIALS"
             echo "============================================"
             echo "API Server: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
             echo "Console:    $(oc whoami --show-console 2>/dev/null || echo 'unknown')"
             echo "Username:   kubeadmin"
-            echo "Password:   $(cat /credentials/cluster-*-password 2>/dev/null || echo '(not found)')"
+            echo "Password:   $KUBEADMIN_PASSWORD"
             echo ""
             echo "Login command:"
-            echo "  oc login $(oc whoami --show-server 2>/dev/null) -u kubeadmin -p $(cat /credentials/cluster-*-password 2>/dev/null)"
+            echo "  oc login $(oc whoami --show-server 2>/dev/null) -u kubeadmin -p $KUBEADMIN_PASSWORD"
             echo "============================================"
         fi
 

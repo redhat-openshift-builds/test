@@ -6,12 +6,9 @@ metadata:
     tekton.dev/title: "Run E2E Tests"
 spec:
   params:
-    - name: eaasSpaceSecretRef
+    - name: clusterCredentialsSecretRef
       type: string
-      description: EaaS space secret reference
-    - name: clusterName
-      type: string
-      description: Name of the provisioned cluster
+      description: Secret containing the cluster kubeconfig
     - name: SNAPSHOT
       type: string
       description: Konflux snapshot JSON
@@ -37,28 +34,12 @@ spec:
       description: Name of the dockerconfigjson secret in the pipeline namespace for pushing test images
   volumes:
     - name: credentials
-      emptyDir: {}
+      secret:
+        secretName: $(params.clusterCredentialsSecretRef)
     - name: registry-secret
       secret:
         secretName: $(params.TEST_IMAGE_REPO_SECRET)
   steps:
-    - name: get-kubeconfig
-      ref:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/konflux-ci/build-definitions.git
-          - name: revision
-            value: main
-          - name: pathInRepo
-            value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-      params:
-        - name: eaasSpaceSecretRef
-          value: $(params.eaasSpaceSecretRef)
-        - name: clusterName
-          value: $(params.clusterName)
-        - name: credentials
-          value: credentials
     - name: run-e2e-tests
       image: quay.io/avinkuma/rh-openshift-builds/ci:latest
       computeResources:
@@ -70,7 +51,7 @@ spec:
           cpu: "2"
       env:
         - name: KUBECONFIG
-          value: "/credentials/$(steps.get-kubeconfig.results.kubeconfig)"
+          value: /credentials/kubeconfig
         - name: TEST_NAMESPACE
           value: "openshift-builds"
         - name: BUILDS_SAMPLES_REPO
@@ -84,6 +65,7 @@ spec:
       volumeMounts:
         - name: credentials
           mountPath: /credentials
+          readOnly: true
         - name: registry-secret
           mountPath: /registry-secret
           readOnly: true

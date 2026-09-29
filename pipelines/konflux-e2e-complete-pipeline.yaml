@@ -16,6 +16,22 @@ spec:
       type: string
       description: Builds for OpenShift Version
       default: ""
+    - name: OCP_VERSION
+      type: string
+      description: OpenShift minor version for the ephemeral HyperShift cluster
+      default: "4.22"
+    - name: COMPUTE_NODE_TYPE
+      type: string
+      description: AWS instance type for ephemeral HyperShift worker nodes
+      default: "m5.2xlarge"
+    - name: HYPERSHIFT_NODE_COUNT
+      type: string
+      description: Number of worker nodes for the ephemeral HyperShift cluster
+      default: "3"
+    - name: HOSTED_MANAGEMENT_CLUSTER
+      type: string
+      description: Hosted management cluster used to provision the ephemeral cluster
+      default: "hosted-mgmt2"
     - name: BUILDS_SAMPLES_REPO
       type: string
       description: Builds samples repository URL
@@ -54,22 +70,10 @@ spec:
       type: string
       description: RHEL version suffix used in registry image names (e.g. rhel9, rhel10)
       default: "rhel9"
+  workspaces:
+    - name: shared-workspace
+      description: Workspace shared by pipeline tasks
   tasks:
-    - name: provision-eaas-space
-      taskRef:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/konflux-ci/build-definitions.git
-          - name: revision
-            value: main
-          - name: pathInRepo
-            value: task/eaas-provision-space/0.1/eaas-provision-space.yaml
-      params:
-        - name: ownerName
-          value: $(context.pipelineRun.name)
-        - name: ownerUid
-          value: $(context.pipelineRun.uid)
     - name: validate-snapshot
       description: Verify snapshot images exist and bundle relatedImages match
         (fail-fast before cluster)
@@ -85,9 +89,9 @@ spec:
       params:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
-    - name: provision-cluster
+    - name: prepare-cluster-env
+      description: Write image mirror configuration for OpenShift CI
       runAfter:
-        - provision-eaas-space
         - validate-snapshot
       taskRef:
         resolver: git
@@ -97,42 +101,51 @@ spec:
           - name: revision
             value: $(params.TASKS_REPO_REVISION)
           - name: pathInRepo
-            value: tasks/e2e-provision-cluster.yaml
+            value: tasks/e2e-prepare-cluster-env.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: imageContentSources
-          value: |
-            - source: registry.redhat.io/openshift-builds/openshift-builds-$(params.RHEL_VERSION)-operator
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-operator-bundle
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator-bundle$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-controller-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-controller$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-image-processing-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-processing$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-image-bundler-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-bundler$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-git-cloner-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-git-cloner$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-waiters-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-waiter$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-webhook-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-webhook$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource$(params.VERSION)
-            - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-webhook-$(params.RHEL_VERSION)
-              mirrors:
-                - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource-webhook$(params.VERSION)
+        - name: RHEL_VERSION
+          value: $(params.RHEL_VERSION)
+        - name: VERSION
+          value: $(params.VERSION)
+        - name: COMPUTE_NODE_TYPE
+          value: $(params.COMPUTE_NODE_TYPE)
+        - name: HYPERSHIFT_NODE_COUNT
+          value: $(params.HYPERSHIFT_NODE_COUNT)
+        - name: HOSTED_MANAGEMENT_CLUSTER
+          value: $(params.HOSTED_MANAGEMENT_CLUSTER)
+      workspaces:
+        - name: shared-workspace
+          workspace: shared-workspace
+    - name: provision-cluster
+      runAfter:
+        - prepare-cluster-env
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+        - name: workflow
+          value: hypershift-hostedcluster-workflow
+        - name: clusterProfile
+          value: aws-konflux-prod
+        - name: timeout
+          value: 1h
+        - name: releases
+          value: >-
+            {"latest":{"release":{"channel":"stable","version":"$(params.OCP_VERSION)","architecture":"multi"}}}
+      workspaces:
+        - name: env-files
+          workspace: shared-workspace
+          subPath: env-files
     - name: verify-fips-enabled-on-nodes
       description: Verify that FIPS is enabled on cluster nodes
       runAfter:
@@ -147,10 +160,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-verify-fips.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
     - name: install-openshift-pipelines
       runAfter:
         - provision-cluster
@@ -164,10 +175,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-install-openshift-pipelines.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
     - name: deploy-and-verify-operator
       description: Deploy operator and verify operands and CR status
       runAfter:
@@ -183,10 +192,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-deploy-operator.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
     - name: verify-images
@@ -203,10 +210,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-verify-images.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
     - name: run-e2e-tests
@@ -224,10 +229,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-run-tests.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
         - name: BUILDS_SAMPLES_REPO
@@ -406,10 +409,8 @@ spec:
           - name: pathInRepo
             value: tasks/e2e-dump-cluster-state.yaml
       params:
-        - name: eaasSpaceSecretRef
-          value: $(tasks.provision-eaas-space.results.secretRef)
-        - name: clusterName
-          value: $(tasks.provision-cluster.results.clusterName)
+        - name: clusterCredentialsSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
         - name: DEBUG
