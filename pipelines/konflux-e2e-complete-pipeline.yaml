@@ -55,7 +55,7 @@ spec:
     - name: TASKS_REPO_REVISION
       type: string
       description: Git revision (branch/tag/commit) for the e2e task definitions
-      default: "main"
+      default: "avinal/inline-tasks"
     - name: DEBUG
       type: string
       description:

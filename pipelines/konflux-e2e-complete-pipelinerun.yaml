@@ -9,14 +9,9 @@ spec:
       - name: url
         value: https://github.com/redhat-openshift-builds/test.git
       - name: revision
-        value: main
+        value: avinal/inline-tasks
       - name: pathInRepo
         value: pipelines/konflux-e2e-complete-pipeline.yaml
-  params:
-    - name: TASKS_REPO_URL
-      value: https://github.com/redhat-openshift-builds/test.git
-    - name: TASKS_REPO_REVISION
-      value: main
   workspaces:
     - name: shared-workspace
       volumeClaimTemplate:
