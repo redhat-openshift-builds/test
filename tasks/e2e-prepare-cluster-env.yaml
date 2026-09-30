@@ -1,0 +1,86 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: e2e-prepare-cluster-env
+  annotations:
+    tekton.dev/title: "Prepare OpenShift CI Cluster Environment"
+spec:
+  description: |
+    Writes environment files used by the OpenShift CI cluster provisioner.
+  params:
+    - name: RHEL_VERSION
+      type: string
+      description: RHEL version suffix used in registry image names
+    - name: VERSION
+      type: string
+      description: Version suffix used in mirror image names
+    - name: COMPUTE_NODE_TYPE
+      type: string
+      description: AWS instance type used for HyperShift worker nodes
+    - name: HYPERSHIFT_NODE_COUNT
+      type: string
+      description: Number of HyperShift worker nodes
+    - name: HOSTED_MANAGEMENT_CLUSTER
+      type: string
+      description: Hosted management cluster used by OpenShift CI
+  workspaces:
+    - name: shared-workspace
+      description: Workspace shared by pipeline tasks
+  steps:
+    - name: write-env-files
+      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      env:
+        - name: RHEL_VERSION
+          value: $(params.RHEL_VERSION)
+        - name: VERSION
+          value: $(params.VERSION)
+        - name: COMPUTE_NODE_TYPE
+          value: $(params.COMPUTE_NODE_TYPE)
+        - name: HYPERSHIFT_NODE_COUNT
+          value: $(params.HYPERSHIFT_NODE_COUNT)
+        - name: HOSTED_MANAGEMENT_CLUSTER
+          value: $(params.HOSTED_MANAGEMENT_CLUSTER)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        env_files_path="$(workspaces.shared-workspace.path)/env-files"
+        mkdir -p "$env_files_path"
+
+        printf '%s' "$COMPUTE_NODE_TYPE" > "$env_files_path/COMPUTE_NODE_TYPE"
+        printf '%s' "$HYPERSHIFT_NODE_COUNT" > "$env_files_path/HYPERSHIFT_NODE_COUNT"
+        printf '%s' "$HOSTED_MANAGEMENT_CLUSTER" > "$env_files_path/HOSTED_MANAGEMENT_CLUSTER"
+        printf '%s' "true" > "$env_files_path/FIPS"
+
+        cat > "$env_files_path/IMAGE_CONTENT_SOURCES" <<EOF
+        - source: registry.redhat.io/openshift-builds/openshift-builds-${RHEL_VERSION}-operator
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-operator-bundle
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-operator-bundle${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-controller-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-controller${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-image-processing-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-processing${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-image-bundler-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-image-bundler${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-git-cloner-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-git-cloner${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-waiters-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-waiter${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-webhook-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-webhook${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource${VERSION}
+        - source: registry.redhat.io/openshift-builds/openshift-builds-shared-resource-webhook-${RHEL_VERSION}
+          mirrors:
+            - quay.io/redhat-user-workloads/rh-openshift-builds-tenant/openshift-builds-shared-resource-webhook${VERSION}
+        EOF
