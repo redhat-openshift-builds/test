@@ -60,8 +60,16 @@ spec:
         trap 'rc=$?; [ $rc -ne 0 ] && echo "=== DEBUG TRACE ===" >&2 && cat "$_trace" >&2; rm -f "$_trace"' EXIT
         exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
 
+        echo "=== Credential volume contents ==="
+        ls -la /credentials/ 2>/dev/null || echo "WARNING: /credentials/ not mounted"
+
+        if [ ! -f /credentials/kubeconfig ]; then
+            echo "ERROR: /credentials/kubeconfig not found — credential secret may have unexpected keys"
+            echo "Available keys: $(ls /credentials/ 2>/dev/null || echo 'none')"
+        fi
+
         if [ "$DEBUG" = "true" ]; then
-            KUBEADMIN_PASSWORD=$(cat /credentials/kubeAdminPassword)
+            KUBEADMIN_PASSWORD=$(cat /credentials/kubeAdminPassword 2>/dev/null || cat /credentials/password 2>/dev/null || echo "(not found)")
 
             echo "============================================"
             echo "  CLUSTER CREDENTIALS"

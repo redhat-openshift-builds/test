@@ -76,6 +76,18 @@ spec:
         trap 'rc=$?; [ $rc -ne 0 ] && echo "=== DEBUG TRACE ===" >&2 && cat "$_trace" >&2; rm -f "$_trace"' EXIT
         exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
 
+        if [ ! -f /credentials/kubeconfig ]; then
+            echo "ERROR: /credentials/kubeconfig not found"
+            echo "Available keys in credential secret: $(ls /credentials/ 2>/dev/null || echo 'none')"
+            exit 1
+        fi
+
+        if [ ! -f /registry-secret/.dockerconfigjson ]; then
+            echo "ERROR: /registry-secret/.dockerconfigjson not found — registry pull secret not mounted"
+            echo "Available files: $(ls /registry-secret/ 2>/dev/null || echo 'none')"
+            exit 1
+        fi
+
         export PATH=$PATH:$(go env GOPATH)/bin
 
         SAMPLE_NS="builds-sample"
