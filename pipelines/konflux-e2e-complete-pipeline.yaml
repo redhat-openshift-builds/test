@@ -55,17 +55,13 @@ spec:
     - name: TASKS_REPO_REVISION
       type: string
       description: Git revision (branch/tag/commit) for the e2e task definitions
-      default: "main"
+      default: "avinal/e2e-fix"
     - name: DEBUG
       type: string
       description:
         Set to "true" to dump cluster credentials and keep the cluster
         alive for 10 minutes after pipeline completion for investigation
       default: "false"
-    - name: IMAGE_EXPIRY_HOURS
-      type: string
-      description: Hours until test images in quay.io expire and are auto-deleted
-      default: "1"
     - name: RHEL_VERSION
       type: string
       description: RHEL version suffix used in registry image names (e.g. rhel9, rhel10)
@@ -421,64 +417,3 @@ spec:
           value: $(tasks.verify-images.status)
         - name: run-e2e-tests-status
           value: $(tasks.run-e2e-tests.status)
-    - name: expire-test-images
-      taskSpec:
-        params:
-          - name: IMAGE_EXPIRY_HOURS
-            type: string
-        volumes:
-          - name: registry-secret
-            secret:
-              secretName: redhat-openshift-builds-testing-pull-secret
-        steps:
-          - name: set-expiration
-            image: quay.io/avinkuma/rh-openshift-builds/ci:latest
-            env:
-              - name: IMAGE_EXPIRY_HOURS
-                value: $(params.IMAGE_EXPIRY_HOURS)
-            volumeMounts:
-              - name: registry-secret
-                mountPath: /registry-secret
-                readOnly: true
-            script: |
-              #!/usr/bin/env bash
-              set -uo pipefail
-
-              QUAY_REPO="redhat-openshift-builds/e2e-test"
-              TOKEN=$(jq -r '.auths["quay.io"].auth' /registry-secret/.dockerconfigjson | base64 -d | cut -d: -f2)
-
-              if [ -z "$TOKEN" ]; then
-                  echo "WARN: Could not extract quay.io token, skipping expiration"
-                  exit 0
-              fi
-
-              EXPIRY=$(date -d "+${IMAGE_EXPIRY_HOURS} hours" +%s)
-              echo "Setting expiration to $(date -d "+${IMAGE_EXPIRY_HOURS} hours" '+%Y-%m-%d %H:%M %Z') on all tags"
-
-              TAGS=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
-                "https://quay.io/api/v1/repository/${QUAY_REPO}/tag/?limit=100&onlyActiveTags=true" | \
-                jq -r '.tags[].name' 2>/dev/null || echo "")
-
-              if [ -z "$TAGS" ]; then
-                  echo "No tags found"
-                  exit 0
-              fi
-
-              UPDATED=0
-              for TAG in $TAGS; do
-                  RESP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-                    -H "Authorization: Bearer ${TOKEN}" \
-                    -H "Content-Type: application/json" \
-                    -d "{\"expiration\": ${EXPIRY}}" \
-                    "https://quay.io/api/v1/repository/${QUAY_REPO}/tag/${TAG}")
-                  if [ "$RESP" = "200" ] || [ "$RESP" = "201" ]; then
-                      UPDATED=$((UPDATED + 1))
-                  else
-                      echo "  Failed to set expiration on ${TAG} (HTTP ${RESP})"
-                  fi
-              done
-
-              echo "Set expiration on ${UPDATED} tag(s)"
-      params:
-        - name: IMAGE_EXPIRY_HOURS
-          value: $(params.IMAGE_EXPIRY_HOURS)

@@ -28,17 +28,13 @@ spec:
       type: string
       default: "main"
       description: Shipwright build branch
-    - name: TEST_IMAGE_REPO_SECRET
-      type: string
-      default: "redhat-openshift-builds-testing-pull-secret"
-      description: Name of the dockerconfigjson secret in the pipeline namespace for pushing test images
   volumes:
     - name: credentials
       secret:
         secretName: $(params.clusterCredentialsSecretRef)
     - name: registry-secret
       secret:
-        secretName: $(params.TEST_IMAGE_REPO_SECRET)
+        secretName: redhat-openshift-builds-testing-pull-secret
   steps:
     - name: run-e2e-tests
       image: quay.io/avinkuma/rh-openshift-builds/ci:latest
@@ -105,7 +101,7 @@ spec:
         export TEST_WATCH_NAMESPACE="e2e-test"
         export TEST_E2E_SERVICEACCOUNT_NAME="pipeline"
         export TEST_IMAGE_REPO="quay.io/redhat-openshift-builds/e2e-test"
-        export TEST_IMAGE_REPO_SECRET="$(params.TEST_IMAGE_REPO_SECRET)"
+        export TEST_IMAGE_REPO_SECRET="redhat-openshift-builds-testing-pull-secret"
 
         oc create namespace "$TEST_NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
