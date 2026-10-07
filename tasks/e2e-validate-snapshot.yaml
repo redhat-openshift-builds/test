@@ -13,20 +13,12 @@ spec:
     - name: SNAPSHOT
       type: string
       description: Konflux snapshot JSON
-  volumes:
-    - name: registry-secret
-      secret:
-        secretName: redhat-openshift-builds-testing-pull-secret
   steps:
     - name: validate-snapshot
       image: quay.io/avinkuma/rh-openshift-builds/ci:latest
       env:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
-      volumeMounts:
-        - name: registry-secret
-          mountPath: /registry-secret
-          readOnly: true
       script: |
         #!/usr/bin/env bash
         set -eu -o pipefail
@@ -34,14 +26,6 @@ spec:
         _cleanup() { rc=$?; [ $rc -ne 0 ] && echo "=== DEBUG TRACE ===" >&2 && cat "$_trace" >&2; rm -f "$_trace"; rm -rf "${_bundle_dir:-}" "${_extract_dir:-}"; }
         trap _cleanup EXIT
         exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
-
-        echo "=== Registry secret check ==="
-        if [ -f /registry-secret/.dockerconfigjson ]; then
-            echo "PASS: registry secret mounted, registries: $(jq -r '.auths | keys | join(", ")' /registry-secret/.dockerconfigjson)"
-        else
-            echo "FAIL: /registry-secret/.dockerconfigjson not found"
-            echo "Available files: $(ls -la /registry-secret/ 2>/dev/null || echo 'directory not mounted')"
-        fi
 
         echo "=== Snapshot contents ==="
         echo "$SNAPSHOT" | jq -r '.components[] | "\(.name): \(.containerImage)"'

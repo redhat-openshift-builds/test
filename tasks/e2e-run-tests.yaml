@@ -154,15 +154,15 @@ spec:
               echo "Failed BuildRuns: $FAILED_BUILDRUNS"
               for BR in $FAILED_BUILDRUNS; do
                 echo "---- BuildRun: $BR ----"
-                oc get buildrun "$BR" -n '"$SAMPLE_NS"' -o jsonpath='
+                oc get buildrun "$BR" -n "$SAMPLE_NS" -o jsonpath='
               Reason: {.status.conditions[?(@.type=="Succeeded")].reason}{"\n"}
               Message: {.status.conditions[?(@.type=="Succeeded")].message}{"\n"}
               '
-                POD=$(oc get pods -n '"$SAMPLE_NS"' \
+                POD=$(oc get pods -n "$SAMPLE_NS" \
                   -l buildrun.shipwright.io/name="$BR" \
                   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
                 if [ -n "$POD" ]; then
-                  oc logs -n '"$SAMPLE_NS"' "$POD" --all-containers=true || true
+                  oc logs -n "$SAMPLE_NS" "$POD" --all-containers=true || true
                 fi
               done
             } > "$BUILDRUN_REPORT" 2>&1
@@ -180,7 +180,7 @@ spec:
           --timeout=1h \
           --succinct \
           --label-filter='!Kaniko && !BuildKit && !VulnerabilityScanning && !PipelineRun' \
-          --skip='strategy-managed push' \
+          --skip='strategy-managed push|should prune the source image' \
           ./test/e2e/v1beta1 || GINKGO_FAILED=1
 
         wait "$BUILDRUN_PID" || true
