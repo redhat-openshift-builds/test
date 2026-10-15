@@ -30,6 +30,12 @@ spec:
         trap 'rc=$?; [ $rc -ne 0 ] && echo "=== DEBUG TRACE ===" >&2 && cat "$_trace" >&2; rm -f "$_trace"' EXIT
         exec 19>"$_trace"; BASH_XTRACEFD=19; set -x
 
+        if [ ! -f /credentials/kubeconfig ]; then
+            echo "ERROR: /credentials/kubeconfig not found"
+            echo "Available keys in credential secret: $(ls /credentials/ 2>/dev/null || echo 'none')"
+            exit 1
+        fi
+
         echo "Verifying FIPS compliance on cluster nodes..."
 
         WORKER_NODES=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}')
