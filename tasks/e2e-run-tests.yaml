@@ -37,7 +37,7 @@ spec:
         secretName: redhat-openshift-builds-testing-pull-secret
   steps:
     - name: run-e2e-tests
-      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      image: quay.io/redhat-user-workloads/rh-openshift-builds-tenant/e2e-ci-toolset@sha256:169c06aed0aee31c8b85e2524344f9a7a5728713edbdfd9aa30d318c84136501
       computeResources:
         requests:
           memory: 4Gi

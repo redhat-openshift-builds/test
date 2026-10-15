@@ -18,7 +18,7 @@ spec:
         secretName: $(params.clusterCredentialsSecretRef)
   steps:
     - name: deploy-operator
-      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      image: quay.io/redhat-user-workloads/rh-openshift-builds-tenant/e2e-ci-toolset@sha256:169c06aed0aee31c8b85e2524344f9a7a5728713edbdfd9aa30d318c84136501
       env:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
@@ -102,7 +102,7 @@ spec:
 
         echo "Operator deployed successfully"
     - name: verify-operands
-      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      image: quay.io/redhat-user-workloads/rh-openshift-builds-tenant/e2e-ci-toolset@sha256:169c06aed0aee31c8b85e2524344f9a7a5728713edbdfd9aa30d318c84136501
       env:
         - name: KUBECONFIG
           value: /credentials/kubeconfig
@@ -152,7 +152,7 @@ spec:
 
         echo "All operands deployed."
     - name: verify-cr-status
-      image: quay.io/avinkuma/rh-openshift-builds/ci:latest
+      image: quay.io/redhat-user-workloads/rh-openshift-builds-tenant/e2e-ci-toolset@sha256:169c06aed0aee31c8b85e2524344f9a7a5728713edbdfd9aa30d318c84136501
       env:
         - name: KUBECONFIG
           value: /credentials/kubeconfig
