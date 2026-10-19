@@ -8,6 +8,8 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "main"
+      && ("images/e2e-ci/Dockerfile".pathChanged() || ".tekton/e2e-ci-toolset-pull-request.yaml".pathChanged()
+      || ".tekton/e2e-ci-toolset-push.yaml".pathChanged())
   labels:
     appstudio.openshift.io/application: openshift-builds-test
     appstudio.openshift.io/component: e2e-ci-toolset
