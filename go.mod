@@ -1,6 +1,6 @@
 module github.com/redhat-openshift-builds/test
 
-go 1.25.3
+go 1.26.0
 
 require (
 	github.com/onsi/ginkgo/v2 v2.27.2
@@ -120,7 +120,7 @@ require (
 	golang.org/x/exp v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/oauth2 v0.31.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.37.0 // indirect
