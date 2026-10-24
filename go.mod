@@ -1,6 +1,6 @@
 module github.com/redhat-openshift-builds/test
 
-go 1.25.3
+go 1.27
 
 require (
 	github.com/onsi/ginkgo/v2 v2.27.2
@@ -149,7 +149,7 @@ require (
 	sigs.k8s.io/kustomize/api v0.19.0 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.19.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
