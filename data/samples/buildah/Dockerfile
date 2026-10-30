@@ -1,6 +1,6 @@
 # Referenced from From https://github.com/shipwrigh-io/sample-go
 
-FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS build
+FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1793294290 AS build
 
 COPY main.go .
 ENV CGO_ENABLED=0
