@@ -7,7 +7,7 @@ require (
 	github.com/onsi/gomega v1.38.2
 	github.com/shipwright-io/build v0.18.1
 	github.com/shipwright-io/cli v0.18.0
-	github.com/tektoncd/pipeline v1.6.0
+	github.com/tektoncd/pipeline v1.6.2
 	k8s.io/api v0.33.6
 	k8s.io/apimachinery v0.33.6
 	k8s.io/cli-runtime v0.33.6
