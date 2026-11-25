@@ -1,4 +1,4 @@
-FROM registry.redhat.io/ubi10/go-toolset@sha256:05619897582acb01ee5dd3eaa2934a7cc2f24409a255142a704b734ef07b68a6 AS builder
+FROM registry.redhat.io/ubi10/go-toolset@sha256:b9f867772f02ef0c8167b1ac327b615c9c6b06be16f5a42ea322597633d1d25e AS builder
 
 ARG TARGETARCH=amd64
 
@@ -22,7 +22,7 @@ RUN curl -fLo /tmp/oc.tar.gz \
 RUN GOPATH=/tmp/go go install github.com/onsi/ginkgo/v2/ginkgo@latest && \
     mv /tmp/go/bin/ginkgo /tmp/ginkgo
 
-FROM registry.redhat.io/ubi10/go-toolset@sha256:05619897582acb01ee5dd3eaa2934a7cc2f24409a255142a704b734ef07b68a6
+FROM registry.redhat.io/ubi10/go-toolset@sha256:b9f867772f02ef0c8167b1ac327b615c9c6b06be16f5a42ea322597633d1d25e
 
 USER root
 
